@@ -1,0 +1,97 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "kwektuanze"
+date: "15 March, 2015"
+output: html_document
+---
+
+## Executive Summary
+The goal of this project report is 1. Use data from accelerometers on the belt, forearm, arm, and dumbell of six participants; 2. Build a prediction model (machine learning algorithm), with cross validation and sample error estimation, to predict how barbell lifts are performed - exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+More info: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset)
+
+## Load Data
+
+```{r warning=FALSE}
+dir.create("./data") #create folder to download data
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", destfile="./data/pml-training.csv", method="curl")
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", destfile="./data/pml-testing.csv", method="curl")
+trainDataRaw <- read.csv("./data/pml-training.csv")
+testDataRaw <- read.csv("./data/pml-testing.csv")
+dim(trainDataRaw)
+dim(testDataRaw)
+```
+
+The raw training data set has 19622 observations and 160 variables, with "classe" variable as the outcomes to predict. The raw testing data set has 20 observations and 160 variables.
+
+## Clean Data
+Observations with missing values and variables that are not relevant to the analysis are removed.
+
+```{r warning=FALSE}
+trainDataRaw <- trainDataRaw[, colSums(is.na(trainDataRaw)) == 0] 
+classe <- trainDataRaw$classe
+trainDataRaw <- trainDataRaw[, !grepl("^X|timestamp|window", names(trainDataRaw))]
+trainDataClean <- trainDataRaw[, sapply(trainDataRaw, is.numeric)]
+trainDataClean$classe <- classe
+dim(trainDataClean)
+
+testDataRaw <- testDataRaw[, colSums(is.na(testDataRaw)) == 0] 
+testDataRaw <- testDataRaw[, !grepl("^X|timestamp|window", names(testDataRaw))]
+testDataClean <- testDataRaw[, sapply(testDataRaw, is.numeric)]
+dim(testDataClean)
+```
+
+The cleaned training data set has 19622 observations and 53 variables, keeping also the "classe" variable. The cleaned testing data set has 20 observations and 53 variables.
+
+## Prepare Cross Validation Data
+The cleaned training data set is split into a pure training data set (60%) and a validation data set (40%) which will be used to conduct cross validation.
+
+```{r warning=FALSE}
+library(caret)
+set.seed(400)
+training <- createDataPartition(trainDataClean$classe, p=0.60, list=F)
+trainData <- trainDataClean[training, ]
+testData <- trainDataClean[-training, ]
+```
+
+## Build Prediction Model (with out of sample error and cross validation)
+* **Decision Tree** algorithm (using <code>rpart</code>) was first used to build the model as the outcomes are categorical (nominal).
+
+```{r warning=FALSE}
+library(rattle)
+modelDt <- train(classe~., data=trainData, method="rpart") #training data
+fancyRpartPlot(modelDt$finalModel)
+predictDt <- predict(modelDt, testData) #testing data
+confusionMatrix(testData$classe, predictDt)
+accuracyDt <- postResample(predictDt, testData$classe)
+accuracyDt
+errorDt <- 1 - as.numeric(confusionMatrix(testData$classe, predictDt)$overall[1])
+errorDt
+```
+
+From the above plot, the outcomes are not definitive. The estimated accuracy of the model is 54.59% which is only slightly better than chance and the estimated out-of-sample error is 45.41%.
+
+* **Random Forest** algorithm was then used to build the model. It selects significant variables automatically and is robust to correlated covariates/outliers. 5-fold cross validation is used.
+
+```{r warning=FALSE}
+modelRf <- train(classe~., data=trainData, method="rf", trControl=trainControl(method="cv", number=5)) # training data
+predictRf <- predict(modelRf, testData) #testing data
+confusionMatrix(testData$classe, predictRf)
+accuracyRf <- postResample(predictRf, testData$classe)
+accuracyRf
+errorRf <- 1 - as.numeric(confusionMatrix(testData$classe, predictRf)$overall[1])
+errorRf
+```
+
+The estimated accuracy of the model is 99.27% and the estimated out-of-sample error is 0.73%, superior compared to the previous Decision Tree. Thus, Random Forest algorithm is chosen as the prediction model.
+
+## Predict Result of Cleaned Test Data
+Apply the prediction model (Random Forest) to the cleaned testing data set.
+
+```{r warning=FALSE}
+result <- predict(modelRf, testDataClean[, -length(names(testDataClean))]) #remove problem_id variable
+result
+```
+
+## Conclusion
+Random Forest is a superior model than Decision Tree for predicting how barbell lifts are performed. Point to note: as the data came from only six participants, it may not be representative of the population as a whole. Future work to collect data from larger pool of participants will be desired.
